@@ -656,7 +656,7 @@ class WebGPUAvatarRenderer {
         const minY = headMinY * sy, maxY = headMaxY * sy;
         const minZ = b.min[2] * sz, maxZ = b.max[2] * sz;
         const cx = (minX + maxX) / 2;
-        const cy = minY + (maxY - minY) * 0.45; // look lower on face, show more chin
+        const cy = minY + (maxY - minY) * 0.50; // center on nose/eyes
         const cz = (minZ + maxZ) / 2;
         const width = maxX - minX;
         const headHeightScaled = maxY - minY;
@@ -671,7 +671,7 @@ class WebGPUAvatarRenderer {
         const distH = (headHeightScaled / 2) / Math.tan(vfov / 2) * 0.25;
         const dist = Math.max(distW, distH, 1);
 
-        this.camera.eye = [cx, cy + 0.15, cz + dist];
+        this.camera.eye = [cx, cy + 0.05, cz + dist];
         this.camera.center = [cx, cy, cz];
         console.log('[WebGPU] Auto-centered camera. Center:', this.camera.center, 'Eye:', this.camera.eye, 'Dist:', dist.toFixed(2));
     }

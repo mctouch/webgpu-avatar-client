@@ -175,9 +175,9 @@ class AvatarApp {
                     browInnerUp: Math.abs(Math.sin(t * 0.3)) * 0.1,
                     browOuterUpRight: Math.abs(Math.cos(t * 0.4)) * 0.08,
                     // Static neutral mouth pose — prevents base-mesh collapse
-                    jawOpen: 0.06,
-                    mouthSmileLeft: 0.04,
-                    mouthSmileRight: 0.04,
+                    jawOpen: 0.10,
+                    mouthSmileLeft: 0.06,
+                    mouthSmileRight: 0.06,
                 });
                 this.setEngineBlendshapes(arr);
             } catch (e) {
