@@ -23,6 +23,9 @@ class AvatarApp {
         this.speechRecognition = null;
         this.speechTranscript = '';
 
+        // TTS state
+        this.currentUtterance = null;
+
         this.ARKIT_ORDER = [
             'eyeLookUpLeft', 'eyeLookUpRight', 'eyeLookDownLeft', 'eyeLookDownRight',
             'eyeLookInLeft', 'eyeLookInRight', 'eyeLookOutLeft', 'eyeLookOutRight',
@@ -157,20 +160,13 @@ class AvatarApp {
         this.demoInterval = setInterval(() => {
             if (!this.engine || this.isStreaming) return;
             t += 0.05;
-            const jaw = (Math.sin(t) * 0.5 + 0.5) * 0.3;
-            const mouth = (Math.sin(t * 2) * 0.5 + 0.5) * 0.2;
-            const eye = (Math.sin(t * 0.5) * 0.5 + 0.5) * 0.1;
+            const eye = (Math.sin(t * 0.5) * 0.5 + 0.5) * 0.05;
             try {
                 const arr = this.toBlendshapeArray({
-                    jawOpen: jaw,
-                    mouthClose: mouth,
                     eyeBlinkLeft: eye,
                     eyeBlinkRight: eye,
-                    mouthSmileLeft: Math.max(0, Math.sin(t)),
-                    mouthSmileRight: Math.max(0, Math.sin(t)),
-                    browInnerUp: Math.abs(Math.sin(t * 0.3)) * 0.2,
-                    browOuterUpRight: Math.abs(Math.cos(t * 0.4)) * 0.15,
-                    cheekPuff: Math.abs(Math.sin(t * 1.5)) * 0.05,
+                    browInnerUp: Math.abs(Math.sin(t * 0.3)) * 0.1,
+                    browOuterUpRight: Math.abs(Math.cos(t * 0.4)) * 0.08,
                 });
                 this.setEngineBlendshapes(arr);
             } catch (e) {
@@ -497,38 +493,8 @@ class AvatarApp {
         utterance.pitch = 1.15;
         utterance.volume = 1.0;
 
-        let closeTimeout = null;
-        const openMouth = (intensity = 0.4) => {
-            const arr = this.toBlendshapeArray({
-                jawOpen: intensity,
-                mouthSmileLeft: 0.12,
-                mouthSmileRight: 0.12,
-                mouthLowerDownLeft: 0.08,
-                mouthLowerDownRight: 0.08,
-            });
-            this.setEngineBlendshapes(arr);
-        };
-        const closeMouth = () => {
-            const arr = this.toBlendshapeArray({
-                jawOpen: 0.02,
-                mouthSmileLeft: 0.02,
-                mouthSmileRight: 0.02,
-            });
-            this.setEngineBlendshapes(arr);
-        };
-
-        utterance.onboundary = (event) => {
-            if (event.name === 'word') {
-                openMouth(0.3 + Math.random() * 0.2);
-                const ms = Math.max(120, event.charLength * 70);
-                if (closeTimeout) clearTimeout(closeTimeout);
-                closeTimeout = setTimeout(closeMouth, Math.min(ms, 350));
-            }
-        };
         utterance.onstart = () => { this.log('Greeting audio started'); };
         utterance.onend = () => {
-            if (closeTimeout) clearTimeout(closeTimeout);
-            closeMouth();
             this.isStreaming = false;
             this.startDemoAnimation();
             this.log('Greeting complete');
@@ -545,6 +511,11 @@ class AvatarApp {
 
     // ========== Browser TTS Fallback =========================================
     async speakWithBrowserTTS(text) {
+        // Cancel any previous speech
+        if (this.currentUtterance) {
+            window.speechSynthesis.cancel();
+            this.currentUtterance = null;
+        }
         this.log('Speaking via browser TTS: ' + text.substring(0, 60) + (text.length > 60 ? '...' : ''));
         this.stopDemoAnimation();
         this.isStreaming = true;
@@ -567,50 +538,23 @@ class AvatarApp {
           || voices.find(v => v.lang && v.lang.startsWith('en'));
 
         const utterance = new SpeechSynthesisUtterance(text);
+        this.currentUtterance = utterance;
         if (femaleVoice) utterance.voice = femaleVoice;
         utterance.rate = 0.92;
         utterance.pitch = 1.15;
         utterance.volume = 1.0;
 
-        let closeTimeout = null;
-        const openMouth = (intensity = 0.4) => {
-            const arr = this.toBlendshapeArray({
-                jawOpen: intensity,
-                mouthSmileLeft: 0.12,
-                mouthSmileRight: 0.12,
-                mouthLowerDownLeft: 0.08,
-                mouthLowerDownRight: 0.08,
-            });
-            this.setEngineBlendshapes(arr);
-        };
-        const closeMouth = () => {
-            const arr = this.toBlendshapeArray({
-                jawOpen: 0.02,
-                mouthSmileLeft: 0.02,
-                mouthSmileRight: 0.02,
-            });
-            this.setEngineBlendshapes(arr);
-        };
-
-        utterance.onboundary = (event) => {
-            if (event.name === 'word') {
-                openMouth(0.3 + Math.random() * 0.2);
-                const ms = Math.max(120, event.charLength * 70);
-                if (closeTimeout) clearTimeout(closeTimeout);
-                closeTimeout = setTimeout(closeMouth, Math.min(ms, 350));
-            }
-        };
         utterance.onstart = () => { this.log('Browser TTS audio started'); };
         utterance.onend = () => {
-            if (closeTimeout) clearTimeout(closeTimeout);
-            closeMouth();
             this.isStreaming = false;
+            this.currentUtterance = null;
             this.startDemoAnimation();
             this.log('Browser TTS complete');
         };
         utterance.onerror = (e) => {
             this.log('Browser TTS error: ' + e.error, 'warn');
             this.isStreaming = false;
+            this.currentUtterance = null;
             this.startDemoAnimation();
         };
 
@@ -819,7 +763,12 @@ class AvatarApp {
             }
             const msg = choice.message;
             let text = msg.content || msg.reasoning || '';
-            text = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+            // Strip various reasoning/thinking tag formats
+            text = text.replace(/<think>[\s\S]*?<\/think>/gi, '');
+            text = text.replace(/Here's a thinking process:[\s\S]*?(?=\n\n|\n[A-Z]|$)/i, '');
+            text = text.replace(/\*\*Thinking:[\s\S]*?(?=\n\n|\n[A-Z]|$)/i, '');
+            text = text.replace(/<\|thinking\|>[\s\S]*?<\|end_thinking\|>/gi, '');
+            text = text.trim();
             if (!text) text = "I'm not sure how to respond to that.";
             this.log('LLM: "' + text.substring(0, 80) + (text.length > 80 ? '...' : '') + '"', 'ok');
             return text;
