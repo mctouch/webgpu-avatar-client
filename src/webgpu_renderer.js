@@ -647,25 +647,19 @@ class WebGPUAvatarRenderer {
         // Scale factor for avatar size
         const sx = 16.0, sy = 16.0, sz = 16.0;
         
-        let minY, maxY;
-        if (height < 3.0) {
-            // Head-only / bust model: use full bounds, don't chop at neck
-            minY = b.min[1] * sy;
-            maxY = b.max[1] * sy;
-        } else {
-            // Full-body model: focus on head region (top ~12%)
-            const neckThreshold = b.min[1] + height * 0.88;
-            minY = Math.max(b.min[1], neckThreshold) * sy;
-            maxY = b.max[1] * sy;
-        }
+        // Head region: top ~25% of model height, capped at 0.35m (35cm)
+        const headHeight = Math.min(height * 0.25, 0.35);
+        const headMinY = Math.max(b.min[1], b.max[1] - headHeight);
+        const headMaxY = b.max[1];
         
         const minX = b.min[0] * sx, maxX = b.max[0] * sx;
+        const minY = headMinY * sy, maxY = headMaxY * sy;
         const minZ = b.min[2] * sz, maxZ = b.max[2] * sz;
         const cx = (minX + maxX) / 2;
         const cy = minY + (maxY - minY) * 0.45; // look lower on face, show more chin
         const cz = (minZ + maxZ) / 2;
         const width = maxX - minX;
-        const height_scaled = maxY - minY;
+        const headHeightScaled = maxY - minY;
 
         // Compute camera distance to fit entire model in view
         const canvas = this.canvas;
@@ -673,9 +667,8 @@ class WebGPUAvatarRenderer {
         const vfov = 45 * Math.PI / 180;
         const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
 
-        // Required distance to fit width and height
         const distW = (width / 2) / Math.tan(hfov / 2) * 0.25;
-        const distH = (height_scaled / 2) / Math.tan(vfov / 2) * 0.25;
+        const distH = (headHeightScaled / 2) / Math.tan(vfov / 2) * 0.25;
         const dist = Math.max(distW, distH, 1);
 
         this.camera.eye = [cx, cy + 0.15, cz + dist];
