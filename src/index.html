@@ -180,11 +180,11 @@
                 <h3>Conversation</h3>
                 <div class="conversation-controls">
                     <button id="btn-talk" class="talk-btn"
-                        onmousedown="window.app.startTalk()"
+                        onmousedown="if (event.buttons === 1) window.app.startTalk()"
                         onmouseup="window.app.stopTalk()"
-                        onmouseleave="window.app.stopTalk()"
-                        ontouchstart="window.app.startTalk()"
-                        ontouchend="window.app.stopTalk()"
+                        onmouseleave="if (window.app.recording) window.app.stopTalk()"
+                        ontouchstart="window.app.startTalk(); event.preventDefault();"
+                        ontouchend="window.app.stopTalk(); event.preventDefault();"
                         disabled>Hold to Talk</button>
                 </div>
                 <div id="conversation-status" style="text-align:center; font-size:0.8rem; color:#888; margin-bottom:0.75rem;">Press and hold to speak</div>
@@ -254,10 +254,10 @@
             </div>
         </div>
     </main>
-    <script src="webgpu_renderer.js?cb=88"></script>
-    <script src="webgl2_renderer.js?cb=88"></script>
-    <script src="a2f-client.js?cb=88"></script>
-    <script src="riva-tts-client.js?cb=88"></script>
-    <script src="app.js?cb=88"></script>
+    <script src="webgpu_renderer.js?cb=89"></script>
+    <script src="webgl2_renderer.js?cb=89"></script>
+    <script src="a2f-client.js?cb=89"></script>
+    <script src="riva-tts-client.js?cb=89"></script>
+    <script src="app.js?cb=89"></script>
 </body>
 </html>

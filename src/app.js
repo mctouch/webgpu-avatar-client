@@ -14,6 +14,14 @@ class AvatarApp {
         this.conversation = [];
         this.recording = false;
         this.recordedChunks = [];
+        this.initialized = false;
+        this.talkAudioCtx = null;
+        this.talkMicStream = null;
+        this.talkProcessor = null;
+
+        // Web Speech API fallback
+        this.speechRecognition = null;
+        this.speechTranscript = '';
 
         this.ARKIT_ORDER = [
             'eyeLookUpLeft', 'eyeLookUpRight', 'eyeLookDownLeft', 'eyeLookDownRight',
@@ -59,6 +67,10 @@ class AvatarApp {
 
     // ========== Init =========================================================
     async init() {
+        if (this.initialized) {
+            this.log('Already initialized');
+            return;
+        }
         try {
             this.log('Initializing Avatar Platform...');
             const canvas = document.getElementById('canvas');
@@ -99,6 +111,7 @@ class AvatarApp {
             this.startRenderLoop();
             this.startDemoAnimation();
             this.log('Initialization complete (' + this.backend + ')');
+            this.initialized = true;
 
             // Enable buttons
             const btnMic = document.getElementById('btn-mic');
@@ -344,11 +357,11 @@ class AvatarApp {
     async speakWithTTS(text) {
         if (!window.RivaTTS || !window.RivaTTS.RivaTTSClient) {
             this.log('Riva TTS client not loaded, falling back to speechSynthesis', 'warn');
-            return this.speakGreeting();
+            return this.speakWithBrowserTTS(text);
         }
         if (!window.Audio2FaceClient) {
             this.log('Audio2Face client not loaded, falling back to speechSynthesis', 'warn');
-            return this.speakGreeting();
+            return this.speakWithBrowserTTS(text);
         }
 
         this.log('Synthesizing TTS via Riva...');
@@ -529,11 +542,87 @@ class AvatarApp {
         window.speechSynthesis.speak(utterance);
     }
 
+    // ========== Browser TTS Fallback =========================================
+    async speakWithBrowserTTS(text) {
+        this.log('Speaking via browser TTS: ' + text.substring(0, 60) + (text.length > 60 ? '...' : ''));
+        this.stopDemoAnimation();
+        this.isStreaming = true;
+
+        let voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) {
+            await new Promise(resolve => {
+                const handler = () => {
+                    voices = window.speechSynthesis.getVoices();
+                    window.speechSynthesis.removeEventListener('voiceschanged', handler);
+                    resolve();
+                };
+                window.speechSynthesis.addEventListener('voiceschanged', handler);
+                setTimeout(resolve, 1000);
+            });
+        }
+        const femaleVoice = voices.find(v =>
+            /Samantha|Victoria|Karen|Moira|Tessa|Fiona|Serena|Zira/.test(v.name)
+        ) || voices.find(v => v.lang === 'en-US' && /Google|Apple/.test(v.name))
+          || voices.find(v => v.lang && v.lang.startsWith('en'));
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        if (femaleVoice) utterance.voice = femaleVoice;
+        utterance.rate = 0.92;
+        utterance.pitch = 1.15;
+        utterance.volume = 1.0;
+
+        let closeTimeout = null;
+        const openMouth = (intensity = 0.4) => {
+            const arr = this.toBlendshapeArray({
+                jawOpen: intensity,
+                mouthSmileLeft: 0.12,
+                mouthSmileRight: 0.12,
+                mouthLowerDownLeft: 0.08,
+                mouthLowerDownRight: 0.08,
+            });
+            this.setEngineBlendshapes(arr);
+        };
+        const closeMouth = () => {
+            const arr = this.toBlendshapeArray({
+                jawOpen: 0.02,
+                mouthSmileLeft: 0.02,
+                mouthSmileRight: 0.02,
+            });
+            this.setEngineBlendshapes(arr);
+        };
+
+        utterance.onboundary = (event) => {
+            if (event.name === 'word') {
+                openMouth(0.3 + Math.random() * 0.2);
+                const ms = Math.max(120, event.charLength * 70);
+                if (closeTimeout) clearTimeout(closeTimeout);
+                closeTimeout = setTimeout(closeMouth, Math.min(ms, 350));
+            }
+        };
+        utterance.onstart = () => { this.log('Browser TTS audio started'); };
+        utterance.onend = () => {
+            if (closeTimeout) clearTimeout(closeTimeout);
+            closeMouth();
+            this.isStreaming = false;
+            this.startDemoAnimation();
+            this.log('Browser TTS complete');
+        };
+        utterance.onerror = (e) => {
+            this.log('Browser TTS error: ' + e.error, 'warn');
+            this.isStreaming = false;
+            this.startDemoAnimation();
+        };
+
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+    }
+
     // ========== Conversation: Talk → ASR → LLM → TTS → A2F ===========
     async startTalk() {
         if (this.recording) return;
         this.recording = true;
         this.recordedChunks = [];
+        this.speechTranscript = '';
 
         const btnTalk = document.getElementById('btn-talk');
         const convStatus = document.getElementById('conversation-status');
@@ -541,12 +630,53 @@ class AvatarApp {
         if (convStatus) convStatus.textContent = 'Recording... speak now';
         this.log('Started recording for ASR', 'info');
 
+        // Use Web Speech API if available (Chrome supports this well)
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            try {
+                this.speechRecognition = new SpeechRecognition();
+                this.speechRecognition.continuous = true;
+                this.speechRecognition.interimResults = true;
+                this.speechRecognition.lang = 'en-US';
+                this.speechRecognition.onresult = (e) => {
+                    let interim = '';
+                    let final = '';
+                    for (let i = e.resultIndex; i < e.results.length; i++) {
+                        const transcript = e.results[i][0].transcript;
+                        if (e.results[i].isFinal) {
+                            final += transcript;
+                        } else {
+                            interim += transcript;
+                        }
+                    }
+                    if (final) this.speechTranscript += final;
+                    if (convStatus) convStatus.textContent = interim || final || 'Listening...';
+                };
+                this.speechRecognition.onerror = (e) => {
+                    if (e.error !== 'no-speech' && e.error !== 'aborted') {
+                        this.log('Speech recognition error: ' + e.error, 'warn');
+                    }
+                };
+                this.speechRecognition.start();
+                this.log('Using Web Speech API for ASR');
+                return;
+            } catch (e) {
+                this.log('Web Speech API failed: ' + e.message + ', falling back to manual recording', 'warn');
+                this.speechRecognition = null;
+            }
+        }
+
+        // Fallback: manual ScriptProcessorNode recording
+        let localAudioCtx = null;
+        let localMicStream = null;
+        let localProcessor = null;
+
         try {
-            this.audioContext = new AudioContext({ sampleRate: 16000 });
-            this.micStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
-            const source = this.audioContext.createMediaStreamSource(this.micStream);
-            this.micProcessor = this.audioContext.createScriptProcessor(4096, 1, 1);
-            this.micProcessor.onaudioprocess = (e) => {
+            localAudioCtx = new AudioContext({ sampleRate: 16000 });
+            localMicStream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1 } });
+            const source = localAudioCtx.createMediaStreamSource(localMicStream);
+            localProcessor = localAudioCtx.createScriptProcessor(4096, 1, 1);
+            localProcessor.onaudioprocess = (e) => {
                 if (!this.recording) return;
                 const input = e.inputBuffer.getChannelData(0);
                 const pcm16 = new Int16Array(input.length);
@@ -556,8 +686,13 @@ class AvatarApp {
                 const buf = new Uint8Array(pcm16.buffer);
                 this.recordedChunks.push(buf);
             };
-            source.connect(this.micProcessor);
-            this.micProcessor.connect(this.audioContext.destination);
+            source.connect(localProcessor);
+            localProcessor.connect(localAudioCtx.destination);
+
+            // Store locally so stopTalk can clean up
+            this.talkAudioCtx = localAudioCtx;
+            this.talkMicStream = localMicStream;
+            this.talkProcessor = localProcessor;
         } catch (e) {
             this.log('Talk mic error: ' + e.message, 'error');
             this.stopTalk();
@@ -574,15 +709,33 @@ class AvatarApp {
         if (convStatus) convStatus.textContent = 'Processing speech...';
         this.log('Stopped recording, sending to ASR...', 'info');
 
-        if (this.micProcessor) { this.micProcessor.disconnect(); this.micProcessor = null; }
-        if (this.micStream) { this.micStream.getTracks().forEach(t => t.stop()); this.micStream = null; }
-        if (this.audioContext) { this.audioContext.close(); this.audioContext = null; }
+        // Stop Web Speech API if active
+        if (this.speechRecognition) {
+            try { this.speechRecognition.stop(); } catch (e) {}
+            await new Promise(r => setTimeout(r, 500)); // let final results come in
+            const transcript = this.speechTranscript.trim();
+            this.speechRecognition = null;
+            if (transcript) {
+                this.log('Web Speech ASR: "' + transcript + '"', 'ok');
+                this.addChatMessage('user', transcript);
+                await this.processUserMessage(transcript, convStatus);
+            } else {
+                this.log('No speech detected from Web Speech API', 'warn');
+                if (convStatus) convStatus.textContent = 'No speech detected. Try again.';
+            }
+            return;
+        }
+
+        // Clean up manual recording
+        if (this.talkProcessor) { this.talkProcessor.disconnect(); this.talkProcessor = null; }
+        if (this.talkMicStream) { this.talkMicStream.getTracks().forEach(t => t.stop()); this.talkMicStream = null; }
+        if (this.talkAudioCtx) { this.talkAudioCtx.close(); this.talkAudioCtx = null; }
 
         let totalLen = 0;
         for (const c of this.recordedChunks) totalLen += c.length;
         if (totalLen < 3200) {
             this.log('Audio too short, ignored', 'warn');
-            if (convStatus) convStatus.textContent = 'Press and hold to speak';
+            if (convStatus) convStatus.textContent = 'No speech detected. Try again.';
             this.recordedChunks = [];
             return;
         }
@@ -598,23 +751,26 @@ class AvatarApp {
                 return;
             }
             this.addChatMessage('user', transcript);
-
-            if (convStatus) convStatus.textContent = 'AI is thinking...';
-            const response = await this.sendToLLM(transcript);
-            if (!response) {
-                if (convStatus) convStatus.textContent = 'No response from AI.';
-                return;
-            }
-            this.addChatMessage('assistant', response);
-
-            if (convStatus) convStatus.textContent = 'AI is speaking...';
-            await this.speakWithTTS(response);
-
-            if (convStatus) convStatus.textContent = 'Press and hold to speak';
+            await this.processUserMessage(transcript, convStatus);
         } catch (e) {
             this.log('Conversation error: ' + e.message, 'error');
             if (convStatus) convStatus.textContent = 'Error: ' + e.message;
         }
+    }
+
+    async processUserMessage(transcript, convStatus) {
+        if (convStatus) convStatus.textContent = 'AI is thinking...';
+        const response = await this.sendToLLM(transcript);
+        if (!response) {
+            if (convStatus) convStatus.textContent = 'No response from AI.';
+            return;
+        }
+        this.addChatMessage('assistant', response);
+
+        if (convStatus) convStatus.textContent = 'AI is speaking...';
+        await this.speakWithTTS(response);
+
+        if (convStatus) convStatus.textContent = 'Press and hold to speak';
     }
 
     async sendAudioToASR(audioBuffer) {
