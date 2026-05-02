@@ -455,9 +455,10 @@ class AvatarApp {
             };
 
         } catch (e) {
-            this.log('TTS/A2F error: ' + e.message, 'error');
+            this.log('TTS/A2F error: ' + e.message + '. Falling back to browser TTS.', 'error');
             this.isStreaming = false;
             this.startDemoAnimation();
+            return this.speakWithBrowserTTS(text);
         }
     }
 
