@@ -2,6 +2,8 @@
 
 A browser-based, GPU-accelerated 3D avatar engine with real-time speech-driven facial animation. Renders a VRM/GLB avatar model using WebGPU compute shaders (with WebGL2 fallback) and drives lip-sync via NVIDIA Audio2Face-3D blendshape streams.
 
+![WebGPU Avatar Screenshot](webgpu-avatar.png)
+
 ## Features
 
 - **WebGPU + WebGL2 fallback** — GPU-accelerated morph-target deformation via WGSL compute shaders; falls back to CPU deformation + WebGL2 if WebGPU is unavailable
