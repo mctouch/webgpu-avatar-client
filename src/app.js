@@ -116,6 +116,13 @@ class AvatarApp {
             this.log('Initialization complete (' + this.backend + ')');
             this.initialized = true;
 
+            // Update connection status badge
+            const connBadge = document.getElementById('conn-status');
+            if (connBadge) {
+                connBadge.textContent = 'Connected';
+                connBadge.className = 'status-badge status-ok';
+            }
+
             // Enable buttons
             const btnMic = document.getElementById('btn-mic');
             const btnTest = document.getElementById('btn-test');
