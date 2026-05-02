@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avatar Platform Diagnostics</title>
+  <style>
+    body { font-family: monospace; background: #0a0a0a; color: #0f0; padding: 20px; max-width: 900px; margin: 0 auto; }
+    h1 { color: #0ff; }
+    .test { border: 1px solid #333; padding: 15px; margin: 10px 0; border-radius: 4px; }
+    .pass { color: #0f0; }
+    .fail { color: #f00; }
+    .warn { color: #ff0; }
+    .info { color: #888; }
+    pre { background: #111; padding: 10px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+    button { background: #0f0; color: #000; border: none; padding: 10px 20px; font-family: monospace; cursor: pointer; font-size: 14px; margin: 5px; }
+    button:hover { background: #0a0; }
+    #log { background: #111; padding: 15px; min-height: 200px; max-height: 400px; overflow-y: auto; border: 1px solid #333; }
+  </style>
+</head>
+<body>
+  <h1>Avatar Platform Diagnostics</h1>
+  <div id="log"></div>
+
+  <div class="test">
+    <h3>Runtime Support</h3>
+    <div id="runtime"></div>
+  </div>
+
+  <div class="test">
+    <h3>WebGPU Details</h3>
+    <div id="webgpu"></div>
+  </div>
+
+  <div class="test">
+    <h3>WASM Module Load Test</h3>
+    <button onclick="testWasm()">Test WASM Import</button>
+    <div id="wasm"></div>
+  </div>
+
+  <div class="test">
+    <h3>WebGPU Canvas Test (No WASM)</h3>
+    <button onclick="testWebGPUCanvas()">Test WebGPU Canvas</button>
+    <canvas id="testcanvas" width="300" height="200" style="border:1px solid #0f0; display:block; margin-top:10px;"></canvas>
+    <div id="canvasresult"></div>
+  </div>
+
+  <div class="test">
+    <h3>Microphone Test</h3>
+    <button onclick="testMic()">Test Microphone</button>
+    <div id="mic"></div>
+  </div>
+
+  <div class="test">
+    <h3>Backend Connectivity</h3>
+    <button onclick="testBackend()">Test Audio2Face + Assets</button>
+    <div id="backend"></div>
+  </div>
+
+  <div class="test">
+    <h3>Main App Launch</h3>
+    <button onclick="location.href='/'">Go to Main App</button>
+  </div>
+
+<script>
+function log(msg, type='info') {
+  const el = document.getElementById('log');
+  const line = document.createElement('div');
+  line.className = type;
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function setHtml(id, html) {
+  document.getElementById(id).innerHTML = html;
+}
+
+// --- Chrome 147+ WebGPU compatibility fix ---
+if (typeof GPUAdapter !== 'undefined' && GPUAdapter.prototype.requestDevice) {
+    const _origRequestDevice = GPUAdapter.prototype.requestDevice;
+    GPUAdapter.prototype.requestDevice = async function(descriptor) {
+        if (descriptor && descriptor.requiredLimits) {
+            const cleaned = {};
+            for (const [key, value] of Object.entries(descriptor.requiredLimits)) {
+                if (key !== 'maxInterStageShaderComponents') {
+                    cleaned[key] = value;
+                }
+            }
+            descriptor = { ...descriptor, requiredLimits: cleaned };
+        }
+        return _origRequestDevice.call(this, descriptor);
+    };
+    log('Applied Chrome 147+ WebGPU compatibility patch', 'warn');
+}
+
+// --- Runtime tests ---
+function runRuntimeTests() {
+  let html = '';
+  const wasmOk = typeof WebAssembly !== 'undefined';
+  html += `<div class="${wasmOk?'pass':'fail'}">WebAssembly: ${wasmOk ? 'YES' : 'NO'}</div>`;
+
+  const webgpuOk = navigator.gpu !== undefined;
+  html += `<div class="${webgpuOk?'pass':'fail'}">WebGPU: ${webgpuOk ? 'YES' : 'NO'}</div>`;
+
+  const mediaOk = navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+  html += `<div class="${mediaOk?'pass':'warn'}">getUserMedia: ${mediaOk ? 'YES' : 'NO (HTTPS required?)'}</div>`;
+
+  const ua = navigator.userAgent;
+  html += `<div class="info">UA: ${ua}</div>`;
+  setHtml('runtime', html);
+  log('Runtime tests complete');
+}
+
+async function runWebGPUTests() {
+  let html = '';
+  if (!navigator.gpu) {
+    html += '<div class="fail">WebGPU not available</div>';
+    setHtml('webgpu', html);
+    return;
+  }
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) {
+      html += '<div class="fail">Adapter returned null (no compatible GPU)</div>';
+      setHtml('webgpu', html);
+      return;
+    }
+    const info = await adapter.requestAdapterInfo();
+    html += `<div class="pass">Adapter: ${info.vendor} / ${info.architecture} / ${info.description}</div>`;
+
+    const device = await adapter.requestDevice();
+    html += `<div class="pass">Device created successfully</div>`;
+
+    const limits = device.limits;
+    html += `<div class="info">maxBufferSize: ${limits.maxBufferSize}</div>`;
+    html += `<div class="info">maxStorageBufferBindingSize: ${limits.maxStorageBufferBindingSize}</div>`;
+    html += `<div class="info">maxComputeInvocationsPerWorkgroup: ${limits.maxComputeInvocationsPerWorkgroup}</div>`;
+
+    device.destroy();
+  } catch (e) {
+    html += `<div class="fail">Error: ${e}</div>`;
+  }
+  setHtml('webgpu', html);
+  log('WebGPU tests complete');
+}
+
+// --- WASM test ---
+async function testWasm() {
+  log('Starting WASM import test...');
+  setHtml('wasm', '<div class="info">Loading...</div>');
+  try {
+    const mod = await import('./avatar_wasm.js');
+    log('WASM module imported', 'pass');
+    setHtml('wasm', '<div class="pass">Import OK. Calling default()...</div>');
+
+    await mod.default();
+    log('WASM initialized successfully', 'pass');
+    setHtml('wasm', '<div class="pass">WASM initialized OK</div>');
+
+    if (typeof mod.AvatarEngine === 'function') {
+      log('AvatarEngine class exported', 'pass');
+      setHtml('wasm', '<div class="pass">AvatarEngine class available</div>');
+    } else {
+      log('AvatarEngine not found in exports', 'fail');
+      setHtml('wasm', '<div class="fail">AvatarEngine not in exports</div>');
+    }
+  } catch (e) {
+    const msg = (e && e.message) ? e.message : String(e);
+    log('WASM test failed: ' + msg, 'fail');
+    setHtml('wasm', `<div class="fail">${msg}</div><pre>${e.stack || ''}</pre>`);
+  }
+}
+
+// --- WebGPU canvas test ---
+async function testWebGPUCanvas() {
+  const canvas = document.getElementById('testcanvas');
+  const result = document.getElementById('canvasresult');
+  try {
+    if (!navigator.gpu) throw new Error('WebGPU not available');
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw new Error('No adapter');
+    const device = await adapter.requestDevice();
+    const ctx = canvas.getContext('webgpu');
+    if (!ctx) throw new Error('canvas.getContext(webgpu) returned null');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({ device, format });
+
+    // Draw a green quad
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+      colorAttachments: [{
+        view: ctx.getCurrentTexture().createView(),
+        loadOp: 'clear',
+        storeOp: 'store',
+        clearValue: { r: 0, g: 0.8, b: 0, a: 1 }
+      }]
+    });
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+
+    result.innerHTML = '<div class="pass">WebGPU canvas rendered green quad</div>';
+    log('WebGPU canvas test passed', 'pass');
+  } catch (e) {
+    result.innerHTML = `<div class="fail">${e.message}</div>`;
+    log('WebGPU canvas test failed: ' + e.message, 'fail');
+  }
+}
+
+// --- Mic test ---
+async function testMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const tracks = stream.getAudioTracks();
+    setHtml('mic', `<div class="pass">Mic access granted. Tracks: ${tracks.length} (${tracks[0].label})</div>`);
+    log('Microphone access OK', 'pass');
+    tracks.forEach(t => t.stop());
+  } catch (e) {
+    setHtml('mic', `<div class="fail">${e.name}: ${e.message}</div>`);
+    log('Microphone access failed: ' + e.message, 'fail');
+  }
+}
+
+// --- Backend test ---
+async function testBackend() {
+  setHtml('backend', '<div class="info">Testing...</div>');
+  try {
+    const health = await fetch('/v1/health/ready').then(r => r.ok ? r.json() : Promise.reject(r.status));
+    const healthStr = JSON.stringify(health);
+    log('Audio2Face health: ' + healthStr, 'pass');
+
+    const head = await fetch('/avatar_wasm_bg.wasm', { method: 'HEAD' });
+    const wasmSize = head.headers.get('content-length');
+    log(`WASM asset: ${wasmSize} bytes (${(wasmSize/1024/1024).toFixed(1)} MB)`, 'pass');
+
+    setHtml('backend', `
+      <div class="pass">Audio2Face ready: ${healthStr}</div>
+      <div class="pass">WASM asset reachable: ${(wasmSize/1024/1024).toFixed(1)} MB</div>
+    `);
+  } catch (e) {
+    setHtml('backend', `<div class="fail">Backend error: ${e}</div>`);
+    log('Backend test failed: ' + e, 'fail');
+  }
+}
+
+// Run on load
+runRuntimeTests();
+runWebGPUTests();
+</script>
+</body>
+</html>
+
+
+

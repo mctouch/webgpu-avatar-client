@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Engine — Conversational AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0a0f;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        header {
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #1a1a2e;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        h1 { font-size: 1.2rem; color: #60a5fa; }
+        .status-badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .status-ok { background: #064e3b; color: #34d399; }
+        .status-warn { background: #78350f; color: #fbbf24; }
+        .status-err { background: #7f1d1d; color: #f87171; }
+        main { flex: 1; display: flex; }
+        #sidebar {
+            width: 360px;
+            border-right: 1px solid #1a1a2e;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        #viewport {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            min-width: 0;
+        }
+        #canvas {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: block;
+            z-index: 1;
+        }
+        .panel { margin-bottom: 1.5rem; }
+        .panel h3 {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        .diagnostic {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid #1a1a2e;
+            font-size: 0.85rem;
+        }
+        .diagnostic:last-child { border-bottom: none; }
+        .diagnostic-label { color: #a0a0a0; }
+        .diagnostic-value { font-family: monospace; font-size: 0.8rem; }
+        button {
+            width: 100%;
+            padding: 0.75rem;
+            background: #1e3a5f;
+            color: #60a5fa;
+            border: 1px solid #2563eb;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            transition: all 0.2s;
+        }
+        button:hover:not(:disabled) { background: #2563eb; color: white; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        button.talk-btn {
+            background: #dc2626;
+            border-color: #b91c1c;
+            color: white;
+            font-size: 1rem;
+            padding: 1rem;
+        }
+        button.talk-btn:hover:not(:disabled) { background: #b91c1c; }
+        button.talk-btn:active:not(:disabled) { background: #991b1b; }
+        button.talk-btn.recording {
+            background: #7f1d1d;
+            animation: pulse 0.8s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        #log {
+            font-family: monospace;
+            font-size: 0.75rem;
+            background: #050508;
+            border: 1px solid #1a1a2e;
+            border-radius: 6px;
+            padding: 0.75rem;
+            max-height: 200px;
+            overflow-y: auto;
+            color: #888;
+            flex-shrink: 0;
+        }
+        #log .info { color: #60a5fa; }
+        #log .ok { color: #34d399; }
+        #log .error { color: #f87171; }
+        #log .warn { color: #fbbf24; }
+        .chat-history {
+            flex: 1;
+            overflow-y: auto;
+            border: 1px solid #1a1a2e;
+            border-radius: 6px;
+            padding: 0.75rem;
+            background: #050508;
+            margin-bottom: 1rem;
+            min-height: 80px;
+            max-height: 200px;
+        }
+        .chat-msg {
+            margin-bottom: 0.75rem;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+        .chat-msg .role {
+            font-weight: 700;
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            margin-bottom: 0.2rem;
+        }
+        .chat-msg.user .role { color: #60a5fa; }
+        .chat-msg.assistant .role { color: #34d399; }
+        .chat-msg .text { color: #ccc; }
+        .placeholder {
+            text-align: center;
+            color: #444;
+            position: absolute;
+            pointer-events: none;
+        }
+        .placeholder svg { width: 120px; height: 120px; margin-bottom: 1rem; opacity: 0.3; }
+        .placeholder h2 { font-size: 1.1rem; margin-bottom: 0.5rem; color: #666; }
+        .placeholder p { font-size: 0.85rem; max-width: 400px; line-height: 1.6; }
+        a.diag-link { color: #60a5fa; font-size: 0.8rem; }
+        .conversation-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .conversation-controls button {
+            flex: 1;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>WASM WebGPU Avatar Engine</h1>
+        <span id="conn-status" class="status-badge status-warn">Connecting</span>
+    </header>
+    <main>
+        <aside id="sidebar">
+            <div class="panel">
+                <h3>Conversation</h3>
+                <div class="conversation-controls">
+                    <button id="btn-talk" class="talk-btn"
+                        onmousedown="window.app.startTalk()"
+                        onmouseup="window.app.stopTalk()"
+                        onmouseleave="window.app.stopTalk()"
+                        ontouchstart="window.app.startTalk()"
+                        ontouchend="window.app.stopTalk()"
+                        disabled>Hold to Talk</button>
+                </div>
+                <div id="conversation-status" style="text-align:center; font-size:0.8rem; color:#888; margin-bottom:0.75rem;">Press and hold to speak</div>
+                <div id="chat-history" class="chat-history"></div>
+            </div>
+            <div class="panel">
+                <h3>System</h3>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">WebGPU</span>
+                    <span id="webgpu-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">WASM</span>
+                    <span id="wasm-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">gRPC-Web</span>
+                    <span id="grpc-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">Microphone</span>
+                    <span id="mic-status" class="diagnostic-value">—</span>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Backend</h3>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">Audio2Face</span>
+                    <span id="a2f-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">ASR</span>
+                    <span id="asr-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">LLM</span>
+                    <span id="llm-status" class="diagnostic-value">—</span>
+                </div>
+                <div class="diagnostic">
+                    <span class="diagnostic-label">TTS</span>
+                    <span id="tts-status" class="diagnostic-value">—</span>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Controls</h3>
+                <button id="btn-init" onclick="window.app.init().catch(e => { console.error(e); })">Initialize Engine</button>
+                <button id="btn-mic" onclick="window.app.toggleMic()" disabled>Start Microphone</button>
+                <button id="btn-test" onclick="window.app.testA2F()" disabled>Test Audio2Face</button>
+                <button id="btn-greet" onclick="window.app.speakGreeting()" disabled>Speak Greeting</button>
+                <a class="diag-link" href="/diag.html" target="_blank">Open Diagnostics Page</a>
+            </div>
+            <div class="panel">
+                <h3>Log</h3>
+                <div id="log"></div>
+            </div>
+        </aside>
+        <div id="viewport">
+            <canvas id="canvas"></canvas>
+            <div id="placeholder" class="placeholder">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                    <path d="M2 17l10 5 10-5"/>
+                    <path d="M2 12l10 5 10-5"/>
+                </svg>
+                <h2>Avatar Viewport</h2>
+                <p>WebGPU canvas will appear here once the WASM module initializes and loads a VRM/GLB avatar model.</p>
+            </div>
+        </div>
+    </main>
+    <script src="webgpu_renderer.js?cb=88"></script>
+    <script src="webgl2_renderer.js?cb=88"></script>
+    <script src="a2f-client.js?cb=88"></script>
+    <script src="riva-tts-client.js?cb=88"></script>
+    <script src="app.js?cb=88"></script>
+</body>
+</html>
