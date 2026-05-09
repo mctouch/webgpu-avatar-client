@@ -1,0 +1,106 @@
+[package]
+name = "wasm-markdown-chat"
+version = "0.1.0"
+edition = "2024"
+authors = ["Multi-Agent Swarm <swarm@local>"]
+description = "WASM WebGPU Markdown & AI Chat Viewer"
+license = "MIT"
+repository = "https://github.com/browser-use/browser-harness"
+
+[package.metadata.wasm-pack]
+wasm-opt = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "wasm-markdown-chat-native"
+path = "src/main.rs"
+
+[dependencies]
+wasm-bindgen = "0.2.100"
+wasm-bindgen-futures = "0.4.50"
+js-sys = "0.3.77"
+console_error_panic_hook = "0.1.7"
+wasm-logger = "0.2"
+env_logger = "0.11"
+
+wgpu = { version = "29.0", default-features = false, features = ["webgpu", "wgsl", "std"] }
+raw-window-handle = "0.6"
+
+glyphon = "0.11"
+cosmic-text = "0.19"
+
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html", "simd"] }
+
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+futures = "0.3"
+log = "0.4"
+bytemuck = { version = "1.22", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+
+web-sys = { version = "0.3.77", features = [
+    "console",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "HtmlCanvasElement",
+    "Window",
+    "CssStyleDeclaration",
+    "EventTarget",
+    "Event",
+    "MouseEvent",
+    "WheelEvent",
+    "KeyboardEvent",
+    "UiEvent",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Headers",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "TextDecoder",
+    "TextDecoderOptions",
+    "Blob",
+    "ImageData",
+    "HtmlImageElement",
+    "CanvasRenderingContext2d",
+    "Url",
+    "DomParser",
+    "SupportedType",
+    "HtmlCollection",
+    "Node",
+    "NodeList",
+    "Performance",
+    "Storage",
+    "Location",
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+winit = { version = "0.30", features = ["rwh_06"] }
+pollster = "0.4"
+reqwest = { version = "0.12", features = ["stream", "json"] }
+tokio = { version = "1.44", features = ["rt-multi-thread", "macros"] }
+tokio-stream = "0.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-net = "0.6"
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
+codegen-units = 1
