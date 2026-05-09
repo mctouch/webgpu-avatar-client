@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body { margin: 0; width: 100%; height: 100%; }
+canvas { width: 100%; height: 100%; display: block; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<script>
+async function main() {
+    const canvas = document.getElementById('canvas');
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+    const ctx = canvas.getContext('webgpu');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({ device, format, alphaMode: 'opaque' });
+
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+            view: ctx.getCurrentTexture().createView(),
+            clearValue: { r: 0, g: 1, b: 0, a: 1 },
+            loadOp: 'clear',
+            storeOp: 'store',
+        }]
+    });
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    console.log('rendered green');
+}
+main();
+</script>
+</body>
+</html>
