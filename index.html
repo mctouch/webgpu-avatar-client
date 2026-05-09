@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WASM WebGPU Markdown + AI Chat</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; background: #0d0d0d; overflow: hidden; font-family: system-ui, sans-serif; }
+        #canvas-container { width: 100%; height: calc(100% - 60px); position: relative; }
+        canvas { width: 100%; height: 100%; display: block; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-size: 18px; pointer-events: none; }
+        #input-bar { position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: #1a1a1a; border-top: 1px solid #333; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+        #input-bar input { flex: 1; height: 40px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; padding: 0 12px; font-size: 14px; }
+        #input-bar button { height: 40px; padding: 0 20px; background: #3b82f6; border: none; border-radius: 8px; color: #fff; font-weight: 500; cursor: pointer; }
+        #input-bar button:hover { background: #2563eb; }
+        #input-bar button:disabled { background: #555; cursor: not-allowed; }
+        #input-bar button.recording { background: #ef4444; }
+        #input-bar button.recording:hover { background: #dc2626; }
+        #api-key-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 100; }
+        #api-key-box { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 24px; width: 400px; max-width: 90%; }
+        #api-key-box h2 { color: #fff; margin-bottom: 12px; font-size: 18px; }
+        #api-key-box p { color: #888; margin-bottom: 16px; font-size: 13px; line-height: 1.5; }
+        #api-key-box input { width: 100%; height: 40px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #fff; padding: 0 12px; font-size: 14px; margin-bottom: 12px; }
+        #api-key-box button { width: 100%; height: 40px; background: #3b82f6; border: none; border-radius: 8px; color: #fff; font-weight: 500; cursor: pointer; }
+        #api-key-box button:hover { background: #2563eb; }
+        #settings-btn { position: fixed; top: 12px; right: 12px; width: 32px; height: 32px; background: #2a2a2a; border: 1px solid #444; border-radius: 8px; color: #888; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 50; }
+        #typing { color: #888; font-size: 13px; display: none; white-space: nowrap; min-width: 120px; }
+        #scroll-bottom { position: absolute; bottom: 8px; right: 16px; width: 32px; height: 32px; background: #2a2a2a; border: 1px solid #444; border-radius: 50%; color: #888; font-size: 18px; cursor: pointer; display: none; align-items: center; justify-content: center; z-index: 10; }
+        #scroll-bottom:hover { background: #3a3a3a; color: #fff; }
+        /* Voice controls */
+        #voice-controls {
+            display: flex; align-items: center; gap: 6px; margin-left: 4px;
+        }
+        #voice-controls button {
+            height: 32px; padding: 0 10px; font-size: 12px; border-radius: 6px;
+            min-width: 48px;
+        }
+        #voice-controls button.active { background: #22c55e; color: #fff; }
+        #voice-controls button:not(.active) { background: #555; color: #ccc; }
+        #voice-status { font-size: 11px; color: #888; min-width: 65px; white-space: nowrap; }
+        /* Avatar overlay panel */
+        #avatar-panel {
+            position: absolute;
+            top: 48px;
+            right: 12px;
+            width: 200px;
+            height: 260px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: none;
+            background: transparent;
+            z-index: 20;
+            pointer-events: none; /* Let clicks/wheel pass through to chat canvas */
+        }
+        #avatar-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            pointer-events: auto; /* Re-enable for the canvas itself if needed */
+        }
+    </style>
+</head>
+<body>
+    <div id="api-key-overlay">
+        <div id="api-key-box">
+            <h2>Enter Kimi API Key</h2>
+            <p>Your API key is stored locally in your browser and sent directly to the Kimi API (api.moonshot.ai). It is never stored on our servers.</p>
+            <input type="password" id="api-key-input" placeholder="sk-..." />
+            <button id="api-key-save">Start Chat</button>
+            <button id="api-key-clear" style="margin-top:8px;width:100%;height:32px;background:transparent;border:1px solid #444;border-radius:8px;color:#888;font-size:12px;cursor:pointer;">Clear Saved Key</button>
+        </div>
+    </div>
+
+    <div id="canvas-container">
+        <div id="loading">Loading WebGPU...</div>
+        <div id="avatar-panel">
+            <canvas id="avatar-canvas"></canvas>
+        </div>
+        <button id="scroll-bottom" title="Scroll to bottom">↓</button>
+    </div>
+    <button id="settings-btn" title="Change API Key">&#9881;</button>
+    <div id="input-bar">
+        <div id="typing">Kimi is thinking...</div>
+        <input type="text" id="message-input" placeholder="Ask Kimi anything..." disabled />
+        <button id="talk-btn" disabled>Talk</button>
+        <button id="test-a2f-btn" disabled>Test A2F</button>
+        <button id="send-btn" disabled>Send</button>
+        <div id="voice-controls">
+            <span id="voice-status">Voice: Off</span>
+            <button id="voice-toggle-btn" title="Toggle voice">🔇</button>
+            <button id="speak-toggle-btn" class="active" title="Toggle auto-speak">🔊</button>
+        </div>
+    </div>
+
+    <!-- Avatar renderer scripts (must load before module) -->
+    <script src="avatar-webgpu.js?v=2038"></script>
+    <script src="avatar-webgl2.js?v=2038"></script>
+    <script src="viseme.js?v=2038"></script>
+    <script src="node_modules/onnxruntime-web/dist/ort.min.js"></script>
+    <script src="viseme-sync.js?v=2038"></script>
+    <script src="piper-tts.js?v=2038"></script>
+    <script src="a2f-bridge.js?v=2038"></script>
+
+    <script type="module">
+        import init, { boot_app, render_frame, read_pixels, init_kimi, send_message, scroll, resize, is_streaming, get_streaming_length, get_last_assistant_message } from './pkg/wasm_markdown_chat.js?v=2038';
+
+        let isTyping = false;
+        let streamingCheckInterval = null;
+        let avatarRenderer = null;
+        let avatarAnimFrame = null;
+        let visemeAnimator = null;
+        let visemeSyncPlayer = null;
+        let lastAssistantText = '';
+
+        // TTS state
+        let audioCtx = null;
+        let piperTTS = null;
+        let voiceEnabled = true;  // overall voice on/off
+        let speakEnabled = true;  // auto-speak responses
+
+        // Speak the given text using server-side Piper TTS (correct espeak phonemization)
+        async function speakResponse(text) {
+            if (!audioCtx) return;
+            try {
+                // Resume audio context if suspended (browser autoplay policy)
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+                
+                const ttsUrl = window.location.protocol + '//' + window.location.hostname + ':8200/v1/tts/synthesize';
+                const resp = await fetch(ttsUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                if (!resp.ok) {
+                    throw new Error('TTS server error: ' + resp.status);
+                }
+                
+                const wavBlob = await resp.blob();
+                const audioBuffer = await audioCtx.decodeAudioData(await wavBlob.arrayBuffer());
+                
+                const source = audioCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(audioCtx.destination);
+                const startTime = audioCtx.currentTime + 0.05;
+                source.start(startTime);
+                
+                // Parse phoneme events from header
+                let phonemeEvents = [];
+                try {
+                    const eventsJson = resp.headers.get('X-Phoneme-Events');
+                    if (eventsJson) phonemeEvents = JSON.parse(eventsJson);
+                } catch(e) {}
+                
+                // Use server-provided phoneme events for lip sync
+                if (visemeSyncPlayer && phonemeEvents.length > 0) {
+                    visemeSyncPlayer.schedule(phonemeEvents, startTime);
+                    window.useVisemeSync = true;
+                    source.onended = () => { window.useVisemeSync = false; };
+                } else if (visemeAnimator) {
+                    visemeAnimator.speak(text, audioBuffer.duration);
+                }
+                
+                console.log('[piper-server] speaking:', text.substring(0, 50) + '...');
+            } catch (e) {
+                console.error('[piper-server] failed:', e);
+                if (visemeAnimator) visemeAnimator.speak(text);
+            }
+        }
+
+        // Expose viseme animator for console testing
+        window.__visemeAnimator = null;
+
+        // Avatar blendshape bridge (called from Rust via eval or exposed function)
+        window.updateAvatarBlendshapes = (weightsObj) => {
+            if (!avatarRenderer) return;
+            const arr = window.ARKIT_ORDER.map(name => weightsObj[name] || 0.0);
+            avatarRenderer.setBlendshapesArray(arr);
+        };
+
+        window.ARKIT_ORDER = [
+            'eyeLookUpLeft', 'eyeLookUpRight', 'eyeLookDownLeft', 'eyeLookDownRight',
+            'eyeLookInLeft', 'eyeLookInRight', 'eyeLookOutLeft', 'eyeLookOutRight',
+            'eyeBlinkLeft', 'eyeBlinkRight', 'eyeSquintLeft', 'eyeSquintRight',
+            'eyeWideLeft', 'eyeWideRight',
+            'browDownLeft', 'browDownRight', 'browInnerUp', 'browOuterUpLeft', 'browOuterUpRight',
+            'noseSneerLeft', 'noseSneerRight',
+            'cheekPuff', 'cheekSquintLeft', 'cheekSquintRight',
+            'jawOpen', 'jawForward', 'jawLeft', 'jawRight',
+            'mouthFunnel', 'mouthPucker', 'mouthLeft', 'mouthRight',
+            'mouthSmileLeft', 'mouthSmileRight', 'mouthFrownLeft', 'mouthFrownRight',
+            'mouthDimpleLeft', 'mouthDimpleRight', 'mouthStretchLeft', 'mouthStretchRight',
+            'mouthRollLower', 'mouthRollUpper', 'mouthShrugLower', 'mouthShrugUpper',
+            'mouthPressLeft', 'mouthPressRight',
+            'mouthLowerDownLeft', 'mouthLowerDownRight', 'mouthUpperUpLeft', 'mouthUpperUpRight',
+            'tongueOut'
+        ];
+
+        async function initAvatar() {
+            const canvas = document.getElementById('avatar-canvas');
+            if (!canvas) return;
+            try {
+                if (navigator.gpu && window.WebGPUAvatarRenderer) {
+                    avatarRenderer = new window.WebGPUAvatarRenderer(canvas);
+                    await avatarRenderer.init();
+                    await avatarRenderer.loadModel('avatar.glb');
+                } else if (window.WebGL2AvatarRenderer) {
+                    avatarRenderer = new window.WebGL2AvatarRenderer(canvas);
+                    await avatarRenderer.loadModel('avatar.glb');
+                } else {
+                    console.warn('[avatar] No renderer available');
+                    return;
+                }
+                // Start avatar render loop
+                let lastT = performance.now();
+                let demoT = 0;
+                visemeAnimator = new window.VisemeAnimator();
+                window.__visemeAnimator = visemeAnimator;
+
+                function avatarLoop() {
+                    if (avatarRenderer) {
+                        const now = performance.now();
+                        const dt = (now - lastT) / 1000;
+                        lastT = now;
+                        demoT += dt;
+
+                        let merged;
+                        if (window.currentA2FWeights) {
+                            // A2F-driven full-face animation
+                            merged = window.currentA2FWeights;
+                        } else if (window.useVisemeSync && visemeSyncPlayer) {
+                            // Viseme sync driven by TTS playback
+                            window.visemeSyncWeights = visemeSyncPlayer.getCurrentWeights(audioCtx.currentTime);
+                            merged = window.visemeSyncWeights;
+                        } else {
+                            // 1. Idle animation (blink, subtle brow)
+                            const blink = (Math.sin(demoT * 0.5) * 0.5 + 0.5) * 0.05;
+                            const idleWeights = new Float32Array(52);
+                            idleWeights[window.ARKIT_ORDER.indexOf('eyeBlinkLeft')] = blink;
+                            idleWeights[window.ARKIT_ORDER.indexOf('eyeBlinkRight')] = blink;
+                            idleWeights[window.ARKIT_ORDER.indexOf('browInnerUp')] = Math.abs(Math.sin(demoT * 0.3)) * 0.08;
+                            idleWeights[window.ARKIT_ORDER.indexOf('browOuterUpRight')] = Math.abs(Math.cos(demoT * 0.4)) * 0.06;
+
+                            // 2. Viseme animation (lip-sync)
+                            const visemeWeights = visemeAnimator ? visemeAnimator.update(dt) : new Float32Array(52);
+
+                            // 3. Merge: viseme overrides idle for mouth/jaw, idle adds to everything else
+                            merged = new Float32Array(52);
+                            for (let i = 0; i < 52; i++) {
+                                merged[i] = idleWeights[i] + visemeWeights[i];
+                                if (merged[i] > 1.0) merged[i] = 1.0;
+                            }
+                        }
+
+                        avatarRenderer.setBlendshapesArray(merged);
+                        avatarRenderer.render(dt);
+                    }
+                    avatarAnimFrame = requestAnimationFrame(avatarLoop);
+                }
+                // Viseme sync player (time-synced lip-sync for TTS)
+                visemeSyncPlayer = null;
+                if (window.VisemeSyncPlayer) {
+                    visemeSyncPlayer = new window.VisemeSyncPlayer();
+                    window.__visemeSyncPlayer = visemeSyncPlayer;
+                    console.log('[visemesync] player created');
+                }
+                window.useVisemeSync = false;
+                // A2F bridge setup
+                window.currentA2FWeights = null;
+                const proxyBase = window.location.protocol + '//' + window.location.hostname + ':8100';
+                window.a2fBridge = new window.A2FBridge({
+                    proxyUrl: proxyBase + '/v1/audio2face/stream',
+                    onBlendshapes: (bsDict) => {
+                        const arr = new Float32Array(52);
+                        for (const [name, val] of Object.entries(bsDict)) {
+                            // A2F returns PascalCase; ARKIT_ORDER is camelCase
+                            const camel = name[0].toLowerCase() + name.slice(1);
+                            const idx = window.ARKIT_ORDER.indexOf(camel);
+                            if (idx >= 0) arr[idx] = val;
+                        }
+                        window.currentA2FWeights = arr;
+                    },
+                    onStatus: (msg) => {
+                        const t = document.getElementById('typing');
+                        if (t) { t.style.display = msg ? 'block' : 'none'; t.textContent = msg; }
+                    },
+                    onError: (msg) => console.error('[A2F]', msg)
+                });
+                avatarLoop();
+                console.log('[avatar] initialized');
+            } catch (e) {
+                console.error('[avatar] init failed:', e);
+                document.getElementById('avatar-status').textContent = 'Error';
+            }
+        }
+
+        async function run() {
+            if (!navigator.gpu) {
+                document.getElementById('loading').textContent = 'WebGPU not supported';
+                return;
+            }
+            await init();
+            await boot_app();
+            document.getElementById('loading').style.display = 'none';
+
+            // Initialize avatar overlay
+            initAvatar();
+
+            // Initialize TTS
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (window.PiperTTS) {
+                piperTTS = new window.PiperTTS('piper-voices/en_US-lessac-medium.onnx', 'piper-voices/en_US-lessac-medium.onnx.json');
+                window.piperTTS = piperTTS;
+                const voiceStatus = document.getElementById('voice-status');
+                const voiceToggleBtn = document.getElementById('voice-toggle-btn');
+                const speakToggleBtn = document.getElementById('speak-toggle-btn');
+
+                function updateVoiceStatus(status) {
+                    if (voiceStatus) voiceStatus.textContent = status;
+                }
+
+                async function initPiper() {
+                    try {
+                        updateVoiceStatus('Voice: Loading');
+                        await piperTTS.load();
+                        updateVoiceStatus('Voice: Ready');
+                        voiceToggleBtn.classList.add('active');
+                        console.log('[piper] TTS engine loaded');
+                    } catch (e) {
+                        console.error('[piper] load failed:', e);
+                        updateVoiceStatus('Voice: Off');
+                        voiceToggleBtn.classList.remove('active');
+                        voiceEnabled = false;
+                    }
+                }
+                initPiper();
+
+                // Voice on/off toggle
+                voiceToggleBtn.addEventListener('click', () => {
+                    voiceEnabled = !voiceEnabled;
+                    if (voiceEnabled) {
+                        voiceToggleBtn.textContent = '🔊';
+                        voiceToggleBtn.classList.add('active');
+                        speakToggleBtn.closest('#voice-controls').querySelector('#voice-status').textContent =
+                            piperTTS.loaded ? 'Voice: Ready' : 'Voice: Loading';
+                    } else {
+                        voiceToggleBtn.textContent = '🔇';
+                        voiceToggleBtn.classList.remove('active');
+                        updateVoiceStatus('Voice: Off');
+                        // Unmute = re-enable auto-speak too
+                        if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+                    }
+                });
+
+                // Speak toggle (auto-speak responses)
+                speakToggleBtn.addEventListener('click', () => {
+                    speakEnabled = !speakEnabled;
+                    if (speakEnabled) {
+                        speakToggleBtn.textContent = '🔊';
+                        speakToggleBtn.classList.add('active');
+                    } else {
+                        speakToggleBtn.textContent = '🔇';
+                        speakToggleBtn.classList.remove('active');
+                    }
+                });
+            } else {
+                const voiceStatus = document.getElementById('voice-status');
+                if (voiceStatus) voiceStatus.textContent = 'Voice: —';
+                console.warn('[piper] PiperTTS not available');
+            }
+
+            // Expose for console testing and pipeline integration
+            // Avatar WS exports removed from this build
+
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+            async function loop() {
+                render_frame();
+                const pixels = await read_pixels();
+                if (pixels.length > 0) {
+                    const imageData = new ImageData(new Uint8ClampedArray(pixels), canvas.width, canvas.height);
+                    ctx.putImageData(imageData, 0, 0);
+                }
+                requestAnimationFrame(loop);
+            }
+            requestAnimationFrame(loop);
+
+            // Enable input after boot
+            const msgInput = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            const typingIndicator = document.getElementById('typing');
+            const scrollBottomBtn = document.getElementById('scroll-bottom');
+
+            // Check for saved API key — pre-fill but don't auto-hide
+            let savedKey = localStorage.getItem('kimi_api_key');
+            if (savedKey && savedKey.startsWith('sk-test-')) {
+                localStorage.removeItem('kimi_api_key');
+                savedKey = null;
+            }
+
+            if (savedKey) {
+                document.getElementById('api-key-input').value = savedKey;
+            }
+            document.getElementById('api-key-input').focus();
+
+            // API key save
+            const talkBtn = document.getElementById('talk-btn');
+            const testA2FBtn = document.getElementById('test-a2f-btn');
+            document.getElementById('api-key-save').addEventListener('click', () => {
+                const key = document.getElementById('api-key-input').value.trim();
+                if (key) {
+                    localStorage.setItem('kimi_api_key', key);
+                    init_kimi(key);
+                    document.getElementById('api-key-overlay').style.display = 'none';
+                    msgInput.disabled = false;
+                    sendBtn.disabled = false;
+                    talkBtn.disabled = false;
+                    testA2FBtn.disabled = false;
+                    msgInput.focus();
+                }
+            });
+
+            document.getElementById('api-key-clear').addEventListener('click', () => {
+                localStorage.removeItem('kimi_api_key');
+                document.getElementById('api-key-input').value = '';
+                document.getElementById('api-key-input').focus();
+            });
+
+            document.getElementById('api-key-input').addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    document.getElementById('api-key-save').click();
+                }
+            });
+
+            // Settings button re-opens overlay
+            document.getElementById('settings-btn').addEventListener('click', () => {
+                const overlay = document.getElementById('api-key-overlay');
+                overlay.style.display = 'flex';
+                const input = document.getElementById('api-key-input');
+                input.value = localStorage.getItem('kimi_api_key') || '';
+                input.focus();
+            });
+
+            // Scroll to bottom button
+            scrollBottomBtn.addEventListener('click', () => {
+                for (let i = 0; i < 50; i++) {
+                    scroll(1000);
+                }
+                scrollBottomBtn.style.display = 'none';
+            });
+
+            // Wheel scrolling
+            canvas.addEventListener('wheel', (e) => {
+                e.preventDefault();
+                scroll(e.deltaY);
+            }, { passive: false });
+
+            // Window resize
+            window.addEventListener('resize', () => {
+                const container = document.getElementById('canvas-container');
+                const w = container.clientWidth;
+                const h = container.clientHeight;
+                canvas.width = w;
+                canvas.height = h;
+                resize(w, h);
+            });
+
+            // Send message
+            function doSend() {
+                const text = msgInput.value.trim();
+                if (!text || isTyping) return;
+                msgInput.value = '';
+                isTyping = true;
+                sendBtn.disabled = true;
+                typingIndicator.style.display = 'block';
+                typingIndicator.textContent = 'Kimi is typing...';
+                scrollBottomBtn.style.display = 'none';
+
+                // Start avatar lip-sync with the user's text (placeholder until we get response text back)
+                if (visemeAnimator) {
+                    visemeAnimator.speak(text || 'Hello');
+                }
+
+                send_message(text);
+
+                // Poll streaming progress
+                streamingCheckInterval = setInterval(() => {
+                    if (is_streaming()) {
+                        const len = get_streaming_length();
+                        typingIndicator.textContent = `Kimi is typing (${len} chars)...`;
+                    } else {
+                        clearInterval(streamingCheckInterval);
+                        streamingCheckInterval = null;
+                        isTyping = false;
+                        sendBtn.disabled = false;
+                        typingIndicator.style.display = 'none';
+                        msgInput.focus();
+                        // Auto-speak assistant response with TTS
+                        const responseText = get_last_assistant_message();
+                        if (responseText && piperTTS && piperTTS.loaded && voiceEnabled && speakEnabled) {
+                            speakResponse(responseText).catch(e => console.error('[speakResponse]', e));
+                        }
+                        // Fallback: animate avatar lip-sync with the actual assistant response
+                        if (visemeAnimator && responseText && (!piperTTS || !piperTTS.loaded || !voiceEnabled || !speakEnabled)) {
+                            visemeAnimator.speak(responseText);
+                        }
+                    }
+                }, 200);
+
+                // Safety timeout in case streaming hangs
+                setTimeout(() => {
+                    if (isTyping) {
+                        isTyping = false;
+                        sendBtn.disabled = false;
+                        typingIndicator.style.display = 'none';
+                        if (streamingCheckInterval) {
+                            clearInterval(streamingCheckInterval);
+                            streamingCheckInterval = null;
+                        }
+                        msgInput.focus();
+                    }
+                }, 30000);
+            }
+
+            sendBtn.addEventListener('click', doSend);
+            msgInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') doSend();
+            });
+
+            // Talk button: hold to record, release to send to A2F
+            talkBtn.addEventListener('mousedown', () => {
+                if (window.a2fBridge) window.a2fBridge.startRecording();
+                talkBtn.classList.add('recording');
+                talkBtn.textContent = 'Recording...';
+            });
+            talkBtn.addEventListener('mouseup', () => {
+                if (window.a2fBridge) window.a2fBridge.stopRecording();
+                talkBtn.classList.remove('recording');
+                talkBtn.textContent = 'Talk';
+            });
+            talkBtn.addEventListener('mouseleave', () => {
+                if (window.a2fBridge && window.a2fBridge.isRecording) {
+                    window.a2fBridge.stopRecording();
+                    talkBtn.classList.remove('recording');
+                    talkBtn.textContent = 'Talk';
+                }
+            });
+            // Touch support
+            talkBtn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (window.a2fBridge) window.a2fBridge.startRecording();
+                talkBtn.classList.add('recording');
+                talkBtn.textContent = 'Recording...';
+            });
+            talkBtn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                if (window.a2fBridge) window.a2fBridge.stopRecording();
+                talkBtn.classList.remove('recording');
+                talkBtn.textContent = 'Talk';
+            });
+
+            // Test A2F button
+            testA2FBtn.addEventListener('click', () => {
+                if (window.a2fBridge) window.a2fBridge.test();
+            });
+        }
+        run().catch(e => {
+            console.error(e);
+            document.getElementById('loading').textContent = 'Error: ' + e;
+        });
+    </script>
+</body>
+</html>
