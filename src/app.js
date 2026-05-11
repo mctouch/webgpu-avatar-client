@@ -76,7 +76,7 @@ class AvatarApp {
         }
         try {
             this.log('Initializing Avatar Platform...');
-            const canvas = document.getElementById('canvas');
+            const canvas = document.getElementById('avatar-canvas');
             if (!canvas) throw new Error('Canvas not found');
 
             const viewport = document.getElementById('viewport');
