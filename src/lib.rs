@@ -182,6 +182,12 @@ pub fn send_message(text: String) {
                 match result {
                     Ok(_) => {
                         app.add_assistant_message(&full_response);
+                        if let Some(ref mut kimi) = app.kimi {
+                            kimi.messages.push(Message {
+                                role: "assistant".to_string(),
+                                content: full_response.clone(),
+                            });
+                        }
                     }
                     Err(e) => {
                         let err_str = format!("{:?}", e);
