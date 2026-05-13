@@ -541,7 +541,7 @@ class PiperTTS {
 }
 
 window.PiperTTS = PiperTTS;
-window.textToIpaPhonemes = textToIpaPhonemes;
+// window.textToIpaPhonemes = textToIpaPhonemes;  // Function not defined
 window.graphemesToArpabet = graphemesToArpabet;
 window.ARPABET_TO_VISeme = ARPABET_TO_VISeme;
 window.arpabetToViseme = arpabetToViseme;
