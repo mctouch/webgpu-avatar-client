@@ -121,6 +121,18 @@
 
         // Speak the given text using server-side Piper TTS (correct espeak phonemization)
         async function speakResponse(text) {
+            // Safari: Use Web Speech API (avoids AudioContext autoplay issues)
+            const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+            if (isSafari && window.speechSynthesis) {
+                console.log('[TTS] Web Speech API (Safari)');
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.rate = 1.0;
+                utterance.pitch = 1.0;
+                if (visemeAnimator) visemeAnimator.speak(text, text.length / 12);
+                window.speechSynthesis.speak(utterance);
+                return;
+            }
+            
             if (!audioCtx) return;
             try {
                 // Resume audio context if suspended (browser autoplay policy)
