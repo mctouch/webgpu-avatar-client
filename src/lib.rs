@@ -8,6 +8,7 @@ pub mod markdown;
 pub mod theme;
 
 use app::App;
+use crate::chat::kimi::Message;
 use std::sync::{Arc, Mutex};
 
 static mut APP: Option<Arc<Mutex<App>>> = None;
